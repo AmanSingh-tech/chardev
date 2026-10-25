@@ -5,6 +5,11 @@ message in a kernel buffer, and each `read()` returns the oldest message
 whole (FIFO). Two ioctls report the message count and clear the queue, and
 `/proc/chardev_stats` shows usage counters.
 
+`demo/index.html` is an interactive browser demo of the driver. It follows the
+same rules as the C code, and lets you step through the race the mutex
+prevents. It's a single static file with no build step; `vercel.json` makes
+Vercel serve the `demo/` folder.
+
 ## Architecture
 
 ```
