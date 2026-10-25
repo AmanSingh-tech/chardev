@@ -1,0 +1,16 @@
+# The tests pass bad pointers on purpose to check the driver returns EFAULT.
+# Valgrind rightly flags those calls; suppress only these two call sites.
+{
+   deliberate-efault-write
+   Memcheck:Param
+   write(buf)
+   ...
+   fun:test_invalid_sizes
+}
+{
+   deliberate-efault-ioctl
+   Memcheck:Param
+   ioctl(generic)
+   ...
+   fun:test_bad_ioctl
+}

@@ -1,0 +1,1292 @@
+<title>chardev Playground</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: a device datasheet. Header, then the live device (user space | kernel space),
+   then the race the mutex prevents, then interface reference. Left-aligned, one column of sections. */
+:root {
+  --paper: #f2f4f8;
+  --panel: #ffffff;
+  --well: #f6f8fb;
+  --field: #ffffff;
+  --ink: #141a26;
+  --ink-2: #505b6e;
+  --ink-3: #7a8598;
+  --rule: rgba(20, 30, 50, 0.12);
+  --rule-strong: rgba(20, 30, 50, 0.22);
+  --accent: #2d5bd8;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(45, 91, 216, 0.10);
+  --btn: #ffffff;
+  --btn-hover: #eef2f9;
+  --free: #e4e9f1;
+  --hdr: #8d9ab0;
+  --rec-a: #4f78e6;
+  --rec-b: #9ab2f0;
+  --ok: #1d7f47;
+  --ok-soft: rgba(29, 127, 71, 0.10);
+  --warn: #9a5b00;
+  --warn-soft: rgba(154, 91, 0, 0.10);
+  --err: #bf3328;
+  --err-soft: rgba(191, 51, 40, 0.09);
+  --t0: #2d5bd8;
+  --t1: #c2410c;
+  --t2: #0e7c6e;
+
+  --f-display: "Archivo", "Arial Narrow", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0d121b; --panel: #141b27; --well: #10161f; --field: #0f151e;
+    --ink: #e3e8f0; --ink-2: #a2adbf; --ink-3: #78849a;
+    --rule: rgba(220, 230, 245, 0.11); --rule-strong: rgba(220, 230, 245, 0.22);
+    --accent: #85a2ff; --accent-ink: #0d121b; --accent-soft: rgba(133, 162, 255, 0.13);
+    --btn: #1a2230; --btn-hover: #222c3d;
+    --free: #1d2634; --hdr: #56637b; --rec-a: #6f8ff2; --rec-b: #3c56a3;
+    --ok: #55c98f; --ok-soft: rgba(85, 201, 143, 0.12);
+    --warn: #e8a845; --warn-soft: rgba(232, 168, 69, 0.12);
+    --err: #ff8073; --err-soft: rgba(255, 128, 115, 0.11);
+    --t0: #85a2ff; --t1: #ff9a62; --t2: #4fd3be;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0d121b; --panel: #141b27; --well: #10161f; --field: #0f151e;
+  --ink: #e3e8f0; --ink-2: #a2adbf; --ink-3: #78849a;
+  --rule: rgba(220, 230, 245, 0.11); --rule-strong: rgba(220, 230, 245, 0.22);
+  --accent: #85a2ff; --accent-ink: #0d121b; --accent-soft: rgba(133, 162, 255, 0.13);
+  --btn: #1a2230; --btn-hover: #222c3d;
+  --free: #1d2634; --hdr: #56637b; --rec-a: #6f8ff2; --rec-b: #3c56a3;
+  --ok: #55c98f; --ok-soft: rgba(85, 201, 143, 0.12);
+  --warn: #e8a845; --warn-soft: rgba(232, 168, 69, 0.12);
+  --err: #ff8073; --err-soft: rgba(255, 128, 115, 0.11);
+  --t0: #85a2ff; --t1: #ff9a62; --t2: #4fd3be;
+  color-scheme: dark;
+}
+
+html { -webkit-tap-highlight-color: transparent; -webkit-text-size-adjust: 100%; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font: 15px/1.55 var(--f-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1180px; margin: 0 auto; padding-block: 44px 72px; display: grid; gap: 64px; }
+code, kbd, .mono { font-family: var(--f-mono); font-size: 0.92em; }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+p { margin: 0; }
+a { color: var(--accent); }
+
+.eyebrow {
+  font: 500 12px/1.3 var(--f-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--ink-3);
+}
+
+/* ---------- header */
+.top { display: grid; gap: 18px; }
+.top h1 {
+  font-family: var(--f-display);
+  font-stretch: 125%;
+  font-weight: 800;
+  font-size: clamp(52px, 10vw, 112px);
+  line-height: 0.88;
+  letter-spacing: -0.025em;
+}
+.top h1 .slash { color: var(--ink-3); font-weight: 500; font-stretch: 100%; }
+.lede { font-size: 18px; max-width: 62ch; color: var(--ink-2); }
+.lede strong { color: var(--ink); font-weight: 600; }
+.ls {
+  font: 13px/1.6 var(--f-mono);
+  color: var(--ink-2);
+  background: var(--panel);
+  box-shadow: 0 0 0 1px var(--rule);
+  border-radius: 8px;
+  padding: 10px 14px;
+  overflow-x: auto;
+  white-space: pre;
+  max-width: 100%;
+  justify-self: start;
+}
+.ls .prompt { color: var(--ink-3); }
+.ls .cmt { color: var(--ink-3); }
+.facts { display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: 13px; color: var(--ink-2); }
+.facts b { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+/* ---------- section heads */
+.sec { display: grid; gap: 20px; }
+.sec-head { display: grid; gap: 8px; max-width: 70ch; }
+.sec-head h2 {
+  font-family: var(--f-display);
+  font-stretch: 112%;
+  font-weight: 700;
+  font-size: clamp(26px, 3.4vw, 36px);
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+}
+.sec-head p { color: var(--ink-2); }
+
+/* ---------- panels */
+.panel {
+  background: var(--panel);
+  border-radius: 12px;
+  box-shadow: 0 0 0 1px var(--rule), 0 1px 3px rgba(10, 20, 40, 0.04);
+  padding: 18px;
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  min-width: 0;
+}
+.panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.panel-head h3 { font: 600 15px/1.3 var(--f-body); }
+
+.play { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 16px; align-items: start; }
+@media (max-width: 920px) { .play { grid-template-columns: minmax(0, 1fr); } }
+
+.sim-note {
+  font-size: 13px; color: var(--ink-2);
+  display: flex; gap: 8px; align-items: baseline;
+}
+.sim-note::before {
+  content: ""; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent); flex: none; transform: translateY(-1px);
+}
+
+/* ---------- controls */
+.field { display: grid; gap: 6px; }
+.field label, .lbl { font-size: 13px; color: var(--ink-2); font-weight: 500; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.input-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+input[type="text"], input[type="number"] {
+  font: 16px/1.3 var(--f-mono);
+  color: var(--ink);
+  background: var(--field);
+  border: 0;
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px var(--rule-strong);
+  padding: 10px 12px;
+  min-width: 0;
+  width: 100%;
+  transition: box-shadow 150ms ease;
+}
+input[type="number"] { width: 96px; }
+input:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent); }
+.count { font: 12px var(--f-mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.count.over { color: var(--err); }
+
+.btn {
+  font: 500 14px/1 var(--f-mono);
+  color: var(--ink);
+  background: var(--btn);
+  border: 0;
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px var(--rule-strong), 0 1px 1px rgba(10, 20, 40, 0.04);
+  padding: 11px 14px;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  white-space: nowrap;
+  transition: transform 160ms var(--ease-out), background-color 150ms ease;
+}
+.btn:active { transform: scale(0.97); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); box-shadow: none; }
+.btn.quiet { font: 500 13px/1 var(--f-body); padding: 8px 11px; color: var(--ink-2); }
+.btn[disabled] { opacity: 0.5; cursor: default; }
+@media (hover: hover) and (pointer: fine) {
+  .btn:hover { background: var(--btn-hover); }
+  .btn.primary:hover { background: var(--accent); filter: brightness(1.08); }
+}
+.check { display: inline-flex; gap: 8px; align-items: center; font-size: 13px; color: var(--ink-2); cursor: pointer; }
+.check input { width: 16px; height: 16px; accent-color: var(--accent); margin: 0; }
+
+/* ---------- logs */
+.log {
+  font: 12.5px/1.65 var(--f-mono);
+  background: var(--well);
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--rule);
+  padding: 10px 12px;
+  height: 236px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+}
+.log .ln { display: block; }
+.log .ret { color: var(--ink-3); }
+.log .ok { color: var(--ok); }
+.log .err { color: var(--err); }
+.log .ts { color: var(--ink-3); }
+.log .dbg { color: var(--ink-3); }
+.log .hint { color: var(--ink-3); font-style: italic; }
+
+/* ---------- memory map */
+.map { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; }
+.offs {
+  display: grid; grid-template-rows: repeat(4, 1fr);
+  font: 11px/1 var(--f-mono); color: var(--ink-3); font-variant-numeric: tabular-nums;
+}
+.offs span { padding-top: 1px; }
+#mapbox { min-width: 0; }
+#map { display: block; border-radius: 4px; touch-action: none; cursor: crosshair; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--ink-2); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.inspect {
+  font: 12.5px/1.4 var(--f-mono); color: var(--ink-2);
+  min-height: 1.4em; font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--rule); border-radius: 8px; overflow: hidden; box-shadow: 0 0 0 1px var(--rule); }
+@media (max-width: 520px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.stat { background: var(--panel); padding: 10px 12px; display: grid; gap: 2px; min-width: 0; }
+.stat .k { font: 11.5px/1.3 var(--f-mono); color: var(--ink-3); }
+.stat .v { font: 600 20px/1.2 var(--f-mono); font-variant-numeric: tabular-nums; }
+.stat .v small { font-weight: 400; font-size: 13px; color: var(--ink-3); }
+
+.queue { display: flex; flex-wrap: wrap; gap: 6px; min-height: 30px; align-content: flex-start; }
+.chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  font: 12.5px/1 var(--f-mono);
+  background: var(--well);
+  box-shadow: inset 0 0 0 1px var(--rule);
+  border-radius: 6px;
+  padding: 7px 9px;
+  max-width: 220px;
+  min-width: 0;
+}
+.chip .txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.chip .n { color: var(--ink-3); flex: none; }
+.chip.head { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.chip.head::before { content: "next"; font-size: 10.5px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.06em; }
+.queue .empty { font-size: 13px; color: var(--ink-3); }
+
+/* ---------- race */
+.race { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 920px) { .race { grid-template-columns: minmax(0, 1fr); } }
+
+.seg {
+  position: relative; display: inline-grid; grid-template-columns: 1fr 1fr;
+  background: var(--well); border-radius: 9px; padding: 3px;
+  box-shadow: inset 0 0 0 1px var(--rule);
+}
+.seg button {
+  position: relative; z-index: 1;
+  font: 500 13.5px/1 var(--f-body); color: var(--ink-2);
+  background: none; border: 0; padding: 9px 14px; border-radius: 7px; cursor: pointer;
+  touch-action: manipulation; white-space: nowrap;
+  transition: color 150ms ease;
+}
+.seg button[aria-pressed="true"] { color: var(--ink); }
+.seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.seg-ind {
+  position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc(50% - 3px);
+  background: var(--panel); border-radius: 7px;
+  box-shadow: 0 0 0 1px var(--rule), 0 1px 2px rgba(10, 20, 40, 0.08);
+  transition: transform 220ms var(--ease-in-out);
+}
+.seg[data-mode="nolock"] .seg-ind { transform: translateX(100%); }
+
+.lanes { display: grid; gap: 8px; }
+.lane {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center;
+  padding: 10px 12px; border-radius: 8px; background: var(--well); box-shadow: inset 0 0 0 1px var(--rule);
+}
+.tid { font: 600 13px/1 var(--f-mono); display: inline-flex; align-items: center; gap: 7px; }
+.tid i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.lane .what { display: grid; gap: 2px; min-width: 0; }
+.lane .msg { font: 12.5px/1.3 var(--f-mono); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lane .note { font-size: 12.5px; color: var(--ink-3); overflow-wrap: anywhere; }
+.pill {
+  font: 500 11.5px/1 var(--f-mono); padding: 5px 8px; border-radius: 99px; white-space: nowrap;
+  background: var(--free); color: var(--ink-2);
+}
+.pill.run { background: var(--accent-soft); color: var(--accent); }
+.pill.sleep { background: var(--warn-soft); color: var(--warn); }
+.pill.done { background: var(--ok-soft); color: var(--ok); }
+.lockline { font: 12.5px/1.5 var(--f-mono); color: var(--ink-2); overflow-wrap: anywhere; }
+.lockline b { color: var(--ink); font-weight: 500; }
+
+.strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(26px, 1fr)); gap: 3px; }
+.cellx {
+  aspect-ratio: 1 / 1.15; max-width: 100%;
+  display: grid; place-items: center;
+  font: 500 12px/1 var(--f-mono);
+  border-radius: 4px;
+  background: var(--free);
+  color: var(--ink-3);
+  transition: background-color 200ms ease, color 200ms ease;
+  position: relative;
+}
+.cellx.hdr { font-size: 10px; }
+.cellx.stale { opacity: 0.45; }
+.cellx.used::after {
+  content: ""; position: absolute; left: 2px; right: 2px; bottom: -3px; height: 2px; border-radius: 1px; background: var(--ink-3);
+}
+.strip-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; font: 12.5px var(--f-mono); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.strip-meta b { color: var(--ink); font-weight: 600; }
+
+.caption {
+  border-radius: 8px; padding: 12px 14px;
+  background: var(--well); box-shadow: inset 0 0 0 1px var(--rule);
+  display: grid; gap: 6px; min-height: 96px; align-content: start;
+}
+.caption .stepno { font: 500 11.5px var(--f-mono); color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.08em; }
+.caption p { font-size: 14.5px; }
+.result { border-radius: 8px; padding: 12px 14px; font-size: 14.5px; font-weight: 500; }
+.result.good { background: var(--ok-soft); color: var(--ok); }
+.result.bad { background: var(--err-soft); color: var(--err); }
+.foot { font-size: 12.5px; color: var(--ink-3); }
+
+/* ---------- reference */
+.cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 920px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+.tbl-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th { text-align: left; font: 500 11.5px/1.3 var(--f-mono); text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-3); padding: 0 12px 8px 0; }
+td { padding: 9px 12px 9px 0; border-top: 1px solid var(--rule); vertical-align: top; }
+td code { white-space: nowrap; }
+.errno { font: 500 12px var(--f-mono); color: var(--err); white-space: nowrap; }
+.errno.okv { color: var(--ok); }
+
+.flow { display: grid; gap: 10px; }
+.tier { display: grid; gap: 8px; }
+.boxes { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.box {
+  font: 12.5px/1.35 var(--f-mono);
+  padding: 8px 10px; border-radius: 7px;
+  background: var(--well); box-shadow: inset 0 0 0 1px var(--rule);
+}
+.box.k { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--rule); }
+.arrow { color: var(--ink-3); font-family: var(--f-mono); }
+.boundary {
+  display: flex; align-items: center; gap: 10px;
+  font: 11.5px/1.3 var(--f-mono); color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.07em;
+}
+.boundary::before, .boundary::after { content: ""; flex: 1; border-top: 1px dashed var(--rule-strong); }
+
+ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14px; }
+ol.steps li::marker { font-family: var(--f-mono); color: var(--ink-3); font-size: 12.5px; }
+
+.cmd { position: relative; }
+.cmd pre {
+  margin: 0; font: 13px/1.7 var(--f-mono);
+  background: var(--well); box-shadow: inset 0 0 0 1px var(--rule);
+  border-radius: 8px; padding: 12px 14px; padding-right: 76px;
+  overflow-x: auto; white-space: pre;
+}
+.cmd pre .cmt { color: var(--ink-3); }
+.cmd .btn { position: absolute; top: 8px; right: 8px; }
+
+.tests { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 28px; }
+@media (max-width: 760px) { .tests { grid-template-columns: minmax(0, 1fr); } }
+.test { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 11px 0; border-top: 1px solid var(--rule); }
+.test b { font-weight: 500; font-size: 14px; }
+.test span { font-size: 13px; color: var(--ink-2); grid-column: 1 / -1; }
+
+footer { font-size: 13px; color: var(--ink-3); display: flex; flex-wrap: wrap; gap: 6px 20px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .btn, .seg-ind { transition: none; }
+  .btn:active { transform: none; }
+}
+</style>
+
+<div class="wrap">
+
+  <header class="top">
+    <span class="eyebrow">Linux kernel module · out-of-tree · GPL-2.0</span>
+    <h1>chardev<span class="slash">/</span></h1>
+    <p class="lede">A character device that works as a <strong>message queue</strong>. Each <code>write()</code> stores one message in a kernel buffer, each <code>read()</code> returns the oldest one whole, and a single mutex keeps concurrent callers from corrupting it.</p>
+    <div class="ls"><span class="prompt">$ </span>ls -l /dev/chardev
+crw------- 1 root root 510, 0 Oct 25 17:13 /dev/chardev   <span class="cmt"># major 510 is an example; it's assigned at load</span></div>
+    <div class="facts">
+      <span>Target <b>Linux 7.0</b></span>
+      <span>Buffer <b>4096 B</b> kmalloc</span>
+      <span>Max message <b>256 B</b></span>
+      <span>Build <b>0 warnings</b> at W=1</span>
+      <span>checkpatch <b>0 errors, 0 warnings</b></span>
+    </div>
+  </header>
+
+  <!-- ===================================================== PLAYGROUND -->
+  <section class="sec" aria-labelledby="play-h">
+    <div class="sec-head">
+      <span class="eyebrow">Try it</span>
+      <h2 id="play-h">Talk to the device</h2>
+      <p class="sim-note">This runs in your browser. It follows the same rules as <code>kernel/chardev.c</code>: the same limits, the same error codes and the same log messages.</p>
+    </div>
+
+    <div class="play">
+      <!-- user space -->
+      <div class="panel">
+        <div class="panel-head">
+          <span class="eyebrow">User space</span>
+          <span class="count">fd 3 → /dev/chardev, O_RDWR</span>
+        </div>
+
+        <div class="field">
+          <label for="msg">Message</label>
+          <div class="input-row">
+            <input id="msg" type="text" value="ping from user space" autocomplete="off" spellcheck="false">
+            <button class="btn primary" id="b-write" type="button">write()</button>
+          </div>
+          <span class="count" id="msg-count">20 / 256 bytes</span>
+        </div>
+
+        <div class="row">
+          <label class="lbl" for="rdsize">Read buffer</label>
+          <input id="rdsize" type="number" min="0" max="65536" value="256" inputmode="numeric">
+          <span class="count">bytes</span>
+          <button class="btn" id="b-read" type="button">read()</button>
+        </div>
+
+        <div class="row">
+          <button class="btn" id="b-count" type="button">ioctl(GET_COUNT)</button>
+          <button class="btn" id="b-clear" type="button">ioctl(CLEAR)</button>
+        </div>
+
+        <div class="field">
+          <span class="lbl">Make it fail</span>
+          <div class="row">
+            <button class="btn quiet" id="e-zero" type="button">Write 0 bytes</button>
+            <button class="btn quiet" id="e-big" type="button">Write 257 bytes</button>
+            <button class="btn quiet" id="e-small" type="button">Read into 4 bytes</button>
+            <button class="btn quiet" id="e-fill" type="button">Fill until full</button>
+            <button class="btn quiet" id="e-ioctl" type="button">Unknown ioctl</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <span class="lbl">System calls, as strace prints them</span>
+          <pre class="log" id="strace" role="log" aria-live="polite"></pre>
+        </div>
+      </div>
+
+      <!-- kernel space -->
+      <div class="panel">
+        <div class="panel-head">
+          <span class="eyebrow">Kernel space</span>
+          <span class="count">msg_buf, 64 × 64 bytes</span>
+        </div>
+
+        <div class="map">
+          <div class="offs" aria-hidden="true"><span>0x000</span><span>0x400</span><span>0x800</span><span>0xC00</span></div>
+          <div id="mapbox"><canvas id="map" role="img" aria-label="Map of the 4096-byte kernel buffer"></canvas></div>
+        </div>
+        <div class="legend">
+          <span><i style="background: var(--hdr)"></i>2-byte length header</span>
+          <span><i style="background: var(--rec-a)"></i><i style="background: var(--rec-b)"></i>message payload</span>
+          <span><i style="background: var(--free)"></i>free</span>
+        </div>
+        <div class="inspect" id="inspect">Hover over or tap a byte to inspect it.</div>
+
+        <div class="stats">
+          <div class="stat"><span class="k">msg_count</span><span class="v" id="s-count">0</span></div>
+          <div class="stat"><span class="k">buf_used</span><span class="v"><span id="s-used">0</span><small> / 4096</small></span></div>
+          <div class="stat"><span class="k">open_count</span><span class="v" id="s-opens">0</span></div>
+          <div class="stat"><span class="k">bytes_written</span><span class="v" id="s-bytes">0</span></div>
+        </div>
+
+        <div class="field">
+          <span class="lbl">Queue, oldest first</span>
+          <div class="queue" id="queue"></div>
+        </div>
+
+        <div class="field">
+          <div class="panel-head">
+            <span class="lbl">dmesg</span>
+            <label class="check"><input type="checkbox" id="dyndbg"> Show pr_debug lines</label>
+          </div>
+          <pre class="log" id="dmesg" style="height: 150px"></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================== RACE -->
+  <section class="sec" aria-labelledby="race-h">
+    <div class="sec-head">
+      <span class="eyebrow">Concurrency</span>
+      <h2 id="race-h">What the mutex prevents</h2>
+      <p>Three threads call <code>write()</code> at the same moment. Step through it with the lock, then without it, and watch the first 48 bytes of the buffer.</p>
+    </div>
+
+    <div class="race">
+      <div class="panel">
+        <div class="row" style="justify-content: space-between">
+          <div class="seg" id="seg" data-mode="mutex" role="group" aria-label="Locking">
+            <span class="seg-ind" aria-hidden="true"></span>
+            <button type="button" data-mode="mutex" aria-pressed="true">With mutex</button>
+            <button type="button" data-mode="nolock" aria-pressed="false">Without lock</button>
+          </div>
+          <div class="row">
+            <button class="btn" id="r-step" type="button">Step</button>
+            <button class="btn" id="r-play" type="button">Play</button>
+            <button class="btn quiet" id="r-reset" type="button">Reset</button>
+          </div>
+        </div>
+
+        <div class="lanes" id="lanes"></div>
+        <div class="lockline" id="lockline"></div>
+      </div>
+
+      <div class="panel">
+        <div class="strip" id="strip" aria-label="First 48 bytes of msg_buf"></div>
+        <div class="strip-meta">
+          <span>buf_used <b id="r-used">0</b></span>
+          <span>msg_count <b id="r-count">0</b></span>
+          <span>underline = inside buf_used</span>
+        </div>
+        <div class="caption" aria-live="polite">
+          <span class="stepno" id="r-stepno">Step 0</span>
+          <p id="r-caption"></p>
+        </div>
+        <div class="result" id="r-result" hidden></div>
+        <p class="foot" id="r-foot"></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================== REFERENCE -->
+  <section class="sec" aria-labelledby="ref-h">
+    <div class="sec-head">
+      <span class="eyebrow">Reference</span>
+      <h2 id="ref-h">Interface</h2>
+    </div>
+
+    <div class="cols">
+      <div class="panel">
+        <h3>System calls</h3>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>Call</th><th>When</th><th>Returns</th></tr></thead>
+            <tbody>
+              <tr><td><code>write</code></td><td>1–256 bytes, room in buffer</td><td class="errno okv">n</td></tr>
+              <tr><td><code>write</code></td><td>0 bytes</td><td class="errno">EINVAL</td></tr>
+              <tr><td><code>write</code></td><td>more than 256 bytes</td><td class="errno">EMSGSIZE</td></tr>
+              <tr><td><code>write</code></td><td>buffer full</td><td class="errno">ENOSPC</td></tr>
+              <tr><td><code>read</code></td><td>message queued, buffer big enough</td><td class="errno okv">length</td></tr>
+              <tr><td><code>read</code></td><td>queue empty</td><td class="errno okv">0 (EOF)</td></tr>
+              <tr><td><code>read</code></td><td>buffer smaller than message (message stays queued)</td><td class="errno">EMSGSIZE</td></tr>
+              <tr><td><code>read</code> / <code>write</code></td><td>bad user pointer (queue unchanged)</td><td class="errno">EFAULT</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>ioctl commands</h3>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>Command</th><th>Encoding</th><th>Value</th></tr></thead>
+            <tbody>
+              <tr><td><code>CHARDEV_IOC_GET_COUNT</code></td><td><code>_IOR('k', 1, __u32)</code></td><td><code>0x80046b01</code></td></tr>
+              <tr><td><code>CHARDEV_IOC_CLEAR</code></td><td><code>_IO('k', 2)</code></td><td><code>0x00006b02</code></td></tr>
+              <tr><td>anything else</td><td></td><td class="errno">ENOTTY</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="foot">The value packs direction (read = 2, top bits), argument size (4), the magic byte <code>'k'</code> (0x6b) and the command number.</p>
+      </div>
+
+      <div class="panel">
+        <h3>Where the code runs</h3>
+        <div class="flow">
+          <div class="tier">
+            <span class="eyebrow">User space</span>
+            <div class="boxes"><span class="box">chardev_test</span><span class="box">cat /proc/chardev_stats</span></div>
+          </div>
+          <div class="boundary">system call · copy_to_user / copy_from_user</div>
+          <div class="tier">
+            <span class="eyebrow">Kernel space</span>
+            <div class="boxes">
+              <span class="box k">VFS</span><span class="arrow">→</span>
+              <span class="box k">chardev_fops</span><span class="arrow">→</span>
+              <span class="box k">chardev_lock</span><span class="arrow">→</span>
+              <span class="box k">msg_buf</span>
+            </div>
+            <div class="boxes">
+              <span class="box k">proc_ops</span><span class="arrow">→</span>
+              <span class="box k">seq_file show()</span><span class="arrow">→</span>
+              <span class="box k">chardev_lock</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>What happens at insmod</h3>
+        <ol class="steps">
+          <li><code>kmalloc</code> the 4096-byte buffer</li>
+          <li><code>alloc_chrdev_region</code> picks a free major number</li>
+          <li><code>cdev_add</code> connects that number to the file operations</li>
+          <li><code>class_create</code> + <code>device_create</code>; udev creates <code>/dev/chardev</code></li>
+          <li><code>proc_create</code> adds <code>/proc/chardev_stats</code></li>
+        </ol>
+        <p class="foot">rmmod undoes these in reverse. If a step fails during load, only the steps before it are undone.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================== TESTS -->
+  <section class="sec" aria-labelledby="test-h">
+    <div class="sec-head">
+      <span class="eyebrow">Verification</span>
+      <h2 id="test-h">What the test suite checks</h2>
+      <p><code>user/chardev_test.c</code> prints PASS or FAIL for each of these, then <code>scripts/run_tests.sh</code> runs it again under valgrind and prints the kernel log.</p>
+    </div>
+    <div class="tests">
+      <div class="test"><b>Write then read back in order</b><span>Three messages come back byte for byte, oldest first.</span></div>
+      <div class="test"><b>Read on empty queue</b><span>Returns 0, so <code>cat</code> stops cleanly.</span></div>
+      <div class="test"><b>ioctl GET_COUNT</b><span>Five writes report a count of five.</span></div>
+      <div class="test"><b>ioctl CLEAR</b><span>Count drops to zero and nothing can be read.</span></div>
+      <div class="test"><b>Invalid sizes and pointers</b><span>EINVAL, EMSGSIZE and EFAULT, and a message survives a too-small read.</span></div>
+      <div class="test"><b>Bad ioctl arguments</b><span>ENOTTY for an unknown command, EFAULT for a NULL argument.</span></div>
+      <div class="test"><b>Buffer full</b><span>ENOSPC after 15 messages of 256 bytes.</span></div>
+      <div class="test"><b>Concurrent readers and writers</b><span>4 + 4 threads move 8,000 messages with none torn, duplicated or lost.</span></div>
+      <div class="test"><b>/proc stats match</b><span>open_count and bytes_written grow by exactly what the test did.</span></div>
+      <div class="test"><b>Close</b><span>Every <code>close()</code> return value is checked.</span></div>
+    </div>
+
+    <div class="cmd">
+      <pre id="cmd-run"><span class="cmt"># build, load, test, valgrind, dmesg, unload</span>
+sudo apt install build-essential linux-headers-$(uname -r) valgrind
+sudo scripts/run_tests.sh</pre>
+      <button class="btn quiet" type="button" data-copy="cmd-run">Copy</button>
+    </div>
+  </section>
+
+  <footer>
+    <span>chardev · GPL-2.0</span>
+    <span>Source layout: include/ · kernel/ · user/ · scripts/</span>
+  </footer>
+</div>
+
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const enc = new TextEncoder();
+  const dec = new TextDecoder();
+
+  /* ================================================== driver model
+     Mirrors kernel/chardev.c: same limits, same checks, same order. */
+  const BUF_SIZE = 4096, HDR = 2, MAX_MSG = 256, FD = 3, PID = 4242;
+  const ERRNO = {
+    EINVAL: "Invalid argument",
+    EMSGSIZE: "Message too long",
+    ENOSPC: "No space left on device",
+    ENOTTY: "Inappropriate ioctl for device",
+  };
+  const drv = { records: [], used: 0, opens: 0, written: 0, seq: 0 };
+  const kmsg = [];
+  const bootBase = 412.031208;
+  const t0 = performance.now();
+
+  function dmesg(level, text) {
+    const ts = bootBase + (performance.now() - t0) / 1000;
+    kmsg.push({ level, text, ts });
+    if (kmsg.length > 400) kmsg.shift();
+  }
+
+  function drvOpen() {
+    drv.opens++;
+    dmesg("debug", `open by pid ${PID}`);
+  }
+  function drvWrite(bytes) {
+    const n = bytes.length;
+    if (n === 0) return { err: "EINVAL" };
+    if (n > MAX_MSG) return { err: "EMSGSIZE" };
+    if (BUF_SIZE - drv.used < HDR + n) return { err: "ENOSPC" };
+    const off = drv.used;
+    drv.records.push({ bytes, seq: drv.seq++ });
+    drv.used += HDR + n;
+    drv.written += n;
+    dmesg("debug", `wrote ${n} bytes, ${drv.records.length} messages queued`);
+    return { ret: n, off };
+  }
+  function drvRead(count) {
+    if (drv.records.length === 0) return { ret: 0, bytes: new Uint8Array(0) };
+    const r = drv.records[0];
+    if (count < r.bytes.length) return { err: "EMSGSIZE" };
+    drv.records.shift();
+    drv.used -= HDR + r.bytes.length;
+    dmesg("debug", `read ${r.bytes.length} bytes, ${drv.records.length} messages left`);
+    return { ret: r.bytes.length, bytes: r.bytes };
+  }
+  function drvClear() {
+    const n = drv.records.length;
+    drv.records = [];
+    drv.used = 0;
+    dmesg("info", `buffer cleared (${n} messages discarded)`);
+  }
+
+  /* ================================================== strace log */
+  const straceEl = $("#strace");
+  const strace = [];
+
+  function cstr(bytes) {
+    let s = "";
+    const n = Math.min(bytes.length, 32);
+    for (let i = 0; i < n; i++) {
+      const c = bytes[i];
+      if (c === 10) s += "\\n";
+      else if (c === 9) s += "\\t";
+      else if (c === 34) s += '\\"';
+      else if (c === 92) s += "\\\\";
+      else if (c >= 32 && c < 127) s += String.fromCharCode(c);
+      else s += "\\" + c.toString(8);
+    }
+    return '"' + s + '"' + (bytes.length > 32 ? "..." : "");
+  }
+  function sys(call, res) {
+    strace.push({ call, res });
+    if (strace.length > 120) strace.shift();
+  }
+  function renderStrace() {
+    straceEl.replaceChildren();
+    for (const { call, res } of strace) {
+      const ln = document.createElement("span");
+      ln.className = "ln";
+      ln.append(call);
+      const r = document.createElement("span");
+      if (res.err) {
+        r.className = "err";
+        r.textContent = ` = -1 ${res.err} (${ERRNO[res.err]})`;
+      } else {
+        r.className = "ok";
+        r.textContent = ` = ${res.ret}`;
+      }
+      ln.append(r);
+      if (res.hint) {
+        const h = document.createElement("span");
+        h.className = "hint";
+        h.textContent = "  " + res.hint;
+        ln.append(h);
+      }
+      straceEl.append(ln);
+    }
+    straceEl.scrollTop = straceEl.scrollHeight;
+  }
+
+  /* ================================================== actions */
+  function doWrite(bytes) {
+    const res = drvWrite(bytes);
+    sys(`write(${FD}, ${cstr(bytes)}, ${bytes.length})`, res);
+    if (!res.err) flash(res.off, res.off + HDR + bytes.length, 0.9);
+    return res;
+  }
+  function doRead(count) {
+    const res = drvRead(count);
+    if (res.err) {
+      sys(`read(${FD}, 0x7ffc5e1d2a40, ${count})`, { ...res, hint: "message stays queued" });
+    } else {
+      sys(`read(${FD}, ${cstr(res.bytes)}, ${count})`, res.ret === 0 ? { ...res, hint: "queue empty, end of file" } : res);
+      if (res.ret > 0 && drv.used > 0) flash(0, drv.used, 0.35);
+    }
+  }
+  function doGetCount() {
+    sys(`ioctl(${FD}, CHARDEV_IOC_GET_COUNT, [${drv.records.length}])`, { ret: 0 });
+  }
+  function doClear() {
+    drvClear();
+    sys(`ioctl(${FD}, CHARDEV_IOC_CLEAR)`, { ret: 0 });
+  }
+
+  const msgEl = $("#msg");
+  const msgCount = $("#msg-count");
+  function updateCount() {
+    const n = enc.encode(msgEl.value).length;
+    msgCount.textContent = `${n} / ${MAX_MSG} bytes`;
+    msgCount.classList.toggle("over", n > MAX_MSG || n === 0);
+  }
+  msgEl.addEventListener("input", updateCount);
+  msgEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); doWrite(enc.encode(msgEl.value)); render(); }
+  });
+  function readSize() {
+    const v = parseInt($("#rdsize").value, 10);
+    return Number.isFinite(v) && v >= 0 ? Math.min(v, 65536) : 256;
+  }
+
+  $("#b-write").addEventListener("click", () => { doWrite(enc.encode(msgEl.value)); render(); });
+  $("#b-read").addEventListener("click", () => { doRead(readSize()); render(); });
+  $("#b-count").addEventListener("click", () => { doGetCount(); render(); });
+  $("#b-clear").addEventListener("click", () => { doClear(); render(); });
+  $("#e-zero").addEventListener("click", () => { doWrite(new Uint8Array(0)); render(); });
+  $("#e-big").addEventListener("click", () => { doWrite(new Uint8Array(257).fill(122)); render(); });
+  $("#e-small").addEventListener("click", () => {
+    if (drv.records.length === 0 || drv.records[0].bytes.length <= 4) doWrite(enc.encode("too long for buf"));
+    doRead(4);
+    render();
+  });
+  $("#e-fill").addEventListener("click", () => {
+    const big = new Uint8Array(MAX_MSG).fill(102);
+    for (let i = 0; i < 40; i++) if (doWrite(big).err) break;
+    render();
+  });
+  $("#e-ioctl").addEventListener("click", () => {
+    sys(`ioctl(${FD}, _IOC(_IOC_NONE, 0x6b, 0x63, 0))`, { err: "ENOTTY" });
+    render();
+  });
+
+  /* ================================================== memory map (canvas) */
+  const canvas = $("#map");
+  const ctx = canvas.getContext("2d");
+  const mapbox = $("#mapbox");
+  const COLS = 64;
+  let cell = 6;
+  let colors = {};
+  let fl = null;
+
+  function readColors() {
+    const cs = getComputedStyle(document.documentElement);
+    const g = (n) => cs.getPropertyValue(n).trim();
+    colors = { free: g("--free"), hdr: g("--hdr"), a: g("--rec-a"), b: g("--rec-b"), accent: g("--accent") };
+  }
+  function sizeMap() {
+    const w = mapbox.clientWidth;
+    cell = Math.max(3, Math.floor(w / COLS));
+    const css = cell * COLS;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.style.width = css + "px";
+    canvas.style.height = css + "px";
+    canvas.width = Math.round(css * dpr);
+    canvas.height = Math.round(css * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawMap();
+  }
+  function cellRect(i) {
+    const s = cell >= 5 ? cell - 1 : cell;
+    ctx.fillRect((i % COLS) * cell, Math.floor(i / COLS) * cell, s, s);
+  }
+  function drawMap(now) {
+    ctx.clearRect(0, 0, cell * COLS, cell * COLS);
+    ctx.fillStyle = colors.free;
+    for (let i = 0; i < BUF_SIZE; i++) cellRect(i);
+    let off = 0;
+    for (const r of drv.records) {
+      ctx.fillStyle = colors.hdr;
+      cellRect(off); cellRect(off + 1);
+      ctx.fillStyle = r.seq % 2 ? colors.b : colors.a;
+      for (let i = 0; i < r.bytes.length; i++) cellRect(off + HDR + i);
+      off += HDR + r.bytes.length;
+    }
+    if (fl) {
+      const t = Math.min(1, ((now ?? performance.now()) - fl.t0) / 450);
+      const eased = 1 - Math.pow(1 - t, 3);
+      ctx.globalAlpha = fl.strength * (1 - eased);
+      ctx.fillStyle = colors.accent;
+      for (let i = fl.from; i < fl.to; i++) cellRect(i);
+      ctx.globalAlpha = 1;
+      if (t >= 1) fl = null;
+      else requestAnimationFrame(drawMap);
+    }
+  }
+  function flash(from, to, strength) {
+    const start = !fl;
+    fl = { from, to, strength, t0: performance.now() };
+    if (start) requestAnimationFrame(drawMap);
+  }
+
+  const inspect = $("#inspect");
+  const inspectIdle = inspect.textContent;
+  function hex(n, w) { return "0x" + n.toString(16).padStart(w, "0"); }
+  function describe(offset) {
+    let off = 0, k = 0;
+    for (const r of drv.records) {
+      const end = off + HDR + r.bytes.length;
+      if (offset < end) {
+        const len = r.bytes.length;
+        if (offset < off + HDR) {
+          const b = offset === off ? len & 0xff : len >> 8;
+          return `${hex(offset, 3)} · message ${k + 1}, header byte ${offset - off} = ${hex(b, 2)} (length ${len})`;
+        }
+        const c = r.bytes[offset - off - HDR];
+        const ch = c >= 32 && c < 127 ? `'${String.fromCharCode(c)}' ` : "";
+        return `${hex(offset, 3)} · message ${k + 1}, payload byte ${offset - off - HDR} = ${ch}${hex(c, 2)}`;
+      }
+      off = end; k++;
+    }
+    return `${hex(offset, 3)} · free (${BUF_SIZE - drv.used} bytes free in total)`;
+  }
+  function onPoint(e) {
+    const rect = canvas.getBoundingClientRect();
+    const col = Math.floor((e.clientX - rect.left) / cell);
+    const row = Math.floor((e.clientY - rect.top) / cell);
+    if (col < 0 || row < 0 || col >= COLS || row >= COLS) return;
+    inspect.textContent = describe(row * COLS + col);
+  }
+  canvas.addEventListener("pointermove", onPoint);
+  canvas.addEventListener("pointerdown", onPoint);
+  canvas.addEventListener("pointerleave", () => { inspect.textContent = inspectIdle; });
+
+  new ResizeObserver(sizeMap).observe(mapbox);
+  const themeChanged = () => { readColors(); drawMap(); renderRace(); };
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", themeChanged);
+  new MutationObserver(themeChanged).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+  /* ================================================== kernel panel */
+  const dmesgEl = $("#dmesg");
+  const dyndbg = $("#dyndbg");
+  dyndbg.addEventListener("change", renderDmesg);
+
+  function renderDmesg() {
+    dmesgEl.replaceChildren();
+    for (const m of kmsg) {
+      if (m.level === "debug" && !dyndbg.checked) continue;
+      const ln = document.createElement("span");
+      ln.className = "ln" + (m.level === "debug" ? " dbg" : "");
+      const ts = document.createElement("span");
+      ts.className = "ts";
+      ts.textContent = `[${m.ts.toFixed(6).padStart(12)}] `;
+      ln.append(ts, `chardev: ${m.text}`);
+      dmesgEl.append(ln);
+    }
+    dmesgEl.scrollTop = dmesgEl.scrollHeight;
+  }
+
+  function renderQueue() {
+    const q = $("#queue");
+    q.replaceChildren();
+    if (drv.records.length === 0) {
+      const e = document.createElement("span");
+      e.className = "empty";
+      e.textContent = "Empty. read() returns 0.";
+      q.append(e);
+      return;
+    }
+    const shown = drv.records.slice(0, 24);
+    shown.forEach((r, i) => {
+      const c = document.createElement("span");
+      c.className = "chip" + (i === 0 ? " head" : "");
+      const t = document.createElement("span");
+      t.className = "txt";
+      t.textContent = dec.decode(r.bytes);
+      const n = document.createElement("span");
+      n.className = "n";
+      n.textContent = `${r.bytes.length} B`;
+      c.append(t, n);
+      q.append(c);
+    });
+    if (drv.records.length > shown.length) {
+      const more = document.createElement("span");
+      more.className = "empty";
+      more.textContent = `+${drv.records.length - shown.length} more`;
+      q.append(more);
+    }
+  }
+
+  function render() {
+    $("#s-count").textContent = drv.records.length;
+    $("#s-used").textContent = drv.used;
+    $("#s-opens").textContent = drv.opens;
+    $("#s-bytes").textContent = drv.written.toLocaleString("en-US");
+    renderStrace();
+    renderQueue();
+    renderDmesg();
+    drawMap();
+  }
+
+  /* ================================================== race simulator */
+  const MSGS = ["from thread 0, hello", "thread 1 wins", "thread 2"];
+  const STRIP = 48;
+  const seg = $("#seg");
+  let mode = "mutex";
+  let rs, script, stepIdx, timer = null;
+
+  function freshState() {
+    return {
+      cells: Array.from({ length: STRIP }, () => ({ b: null, kind: null, owner: -1 })),
+      used: 0, count: 0, lock: null, waiters: [],
+      th: MSGS.map((m) => ({ pill: "idle", label: "not started", note: "", off: 0, cnt: 0 })),
+    };
+  }
+  function copyPayload(i, off) {
+    const bytes = enc.encode(MSGS[i]);
+    bytes.forEach((b, k) => { rs.cells[off + HDR + k] = { b, kind: "pay", owner: i }; });
+  }
+  function writeHdr(i, off) {
+    const len = MSGS[i].length;
+    rs.cells[off] = { b: len & 0xff, kind: "hdr", owner: i };
+    rs.cells[off + 1] = { b: len >> 8, kind: "hdr", owner: i };
+  }
+  function setT(i, pill, label, note = "") { Object.assign(rs.th[i], { pill, label, note }); }
+  const need = (i) => HDR + MSGS[i].length;
+
+  function mutexScript() {
+    const steps = [() => {
+      rs.lock = 0; rs.waiters = [1, 2];
+      setT(0, "run", "holds lock", "inside chardev_write()");
+      setT(1, "sleep", "waiting", "asleep in mutex_lock_interruptible()");
+      setT(2, "sleep", "waiting", "asleep in mutex_lock_interruptible()");
+      return "All three threads call write() at the same moment. W0 gets chardev_lock first. W1 and W2 sleep inside mutex_lock_interruptible() until the lock is released.";
+    }];
+    for (let i = 0; i < 3; i++) {
+      steps.push(() => {
+        rs.th[i].off = rs.used;
+        setT(i, "run", "holds lock", `space check: buf_used = ${rs.used}, needs ${need(i)}`);
+        return `W${i} checks free space. buf_used is ${rs.used} and it needs ${need(i)} bytes (2 for the header, ${MSGS[i].length} for the message), so it fits.`;
+      });
+      steps.push(() => {
+        copyPayload(i, rs.th[i].off);
+        setT(i, "sleep", "holds lock", "copy_from_user(): page fault, sleeping");
+        return i === 0
+          ? `W0 copies its ${MSGS[0].length} bytes with copy_from_user(). The user page isn't resident, so W0 sleeps on a page fault while still holding the lock. A mutex allows that. Holding a spinlock here would be a bug: "sleeping function called from invalid context".`
+          : `W${i} copies its ${MSGS[i].length} bytes to offset ${rs.th[i].off + HDR}. Nobody else can touch buf_used meanwhile, even while W${i} sleeps.`;
+      });
+      steps.push(() => {
+        const off = rs.th[i].off;
+        writeHdr(i, off);
+        rs.used = off + need(i);
+        rs.count++;
+        setT(i, "done", "done", `write() returned ${MSGS[i].length}`);
+        rs.lock = rs.waiters.length ? rs.waiters.shift() : null;
+        if (rs.lock !== null) setT(rs.lock, "run", "holds lock", "woke up with the lock");
+        const next = rs.lock !== null ? ` W${rs.lock} wakes up and takes the lock.` : "";
+        return `W${i} writes the 2-byte length header, advances buf_used to ${rs.used} and msg_count to ${rs.count}, then unlocks.${next}`;
+      });
+    }
+    return steps;
+  }
+
+  function nolockScript() {
+    return [
+      () => {
+        [0, 1, 2].forEach((i) => setT(i, "run", "running", "no lock taken"));
+        return "The same three writes, with the mutex removed. Nothing stops the threads from running the write path at the same time.";
+      },
+      () => {
+        rs.th[0].off = rs.used; rs.th[0].cnt = rs.count;
+        setT(0, "run", "running", "read buf_used = 0");
+        return "W0 reads buf_used = 0 and decides its message fits at offset 0.";
+      },
+      () => {
+        rs.th[1].off = rs.used; rs.th[1].cnt = rs.count;
+        setT(1, "run", "running", "read buf_used = 0");
+        return "Before W0 commits anything, W1 also reads buf_used = 0. Both threads now plan to write at offset 0. This is a check-then-act race.";
+      },
+      () => {
+        copyPayload(0, 0);
+        setT(0, "sleep", "running", "copy_from_user() to offset 2");
+        return `W0 copies its ${MSGS[0].length} bytes to offsets 2–${1 + MSGS[0].length}.`;
+      },
+      () => {
+        copyPayload(1, 0);
+        setT(1, "sleep", "running", "copy_from_user() to offset 2");
+        return `W1 copies its ${MSGS[1].length} bytes to offsets 2–${1 + MSGS[1].length}, overwriting the start of W0's message.`;
+      },
+      () => {
+        writeHdr(0, 0);
+        rs.used = rs.th[0].off + need(0);
+        rs.count = rs.th[0].cnt + 1;
+        setT(0, "done", "done", `write() returned ${MSGS[0].length}`);
+        return `W0 writes its header (length ${MSGS[0].length}), then sets buf_used = ${rs.used} and msg_count = ${rs.count}. write() returns ${MSGS[0].length}, so W0's caller thinks it worked.`;
+      },
+      () => {
+        writeHdr(1, 0);
+        rs.used = rs.th[1].off + need(1);
+        rs.count = rs.th[1].cnt + 1;
+        setT(1, "done", "done", `write() returned ${MSGS[1].length}`);
+        return `W1 overwrites the header with length ${MSGS[1].length}, then sets buf_used = ${rs.used} and msg_count = ${rs.count} from the stale values it read earlier. W0's update is lost.`;
+      },
+      () => {
+        rs.th[2].off = rs.used; rs.th[2].cnt = rs.count;
+        copyPayload(2, rs.th[2].off);
+        setT(2, "sleep", "running", `read buf_used = ${rs.th[2].off}, copying`);
+        return `W2 runs alone. buf_used is ${rs.th[2].off}, so it copies ${MSGS[2].length} bytes to offsets ${rs.th[2].off + 2}–${rs.th[2].off + 1 + MSGS[2].length}, over what was left of W0's message.`;
+      },
+      () => {
+        writeHdr(2, rs.th[2].off);
+        rs.used = rs.th[2].off + need(2);
+        rs.count = rs.th[2].cnt + 1;
+        setT(2, "done", "done", `write() returned ${MSGS[2].length}`);
+        return `W2 writes its header and sets buf_used = ${rs.used}, msg_count = ${rs.count}.`;
+      },
+    ];
+  }
+
+  function verify() {
+    const intact = [];
+    let off = 0, bad = 0;
+    while (off + HDR <= rs.used) {
+      const len = rs.cells[off].b | (rs.cells[off + 1].b << 8);
+      const bytes = rs.cells.slice(off + HDR, off + HDR + len).map((c) => c.b ?? 0);
+      const idx = MSGS.indexOf(dec.decode(new Uint8Array(bytes)));
+      if (idx >= 0) intact.push(idx); else bad++;
+      off += HDR + len;
+    }
+    const lost = [0, 1, 2].filter((i) => !intact.includes(i));
+    return { intact, bad, lost };
+  }
+
+  let caption = "", stepLabel = "Step 0";
+  function resetRace() {
+    stopPlay();
+    rs = freshState();
+    script = mode === "mutex" ? mutexScript() : nolockScript();
+    stepIdx = 0;
+    stepLabel = `Step 0 of ${script.length}`;
+    caption = "Press Step or Play to run three write() calls at once.";
+    $("#r-foot").textContent = mode === "nolock"
+      ? "This is a simplified model: each thread reads buf_used and msg_count once and works from those values. Real interleavings vary, but any of them can lose or corrupt messages."
+      : "";
+    renderRace();
+  }
+  function step() {
+    if (stepIdx >= script.length) return;
+    caption = script[stepIdx]();
+    stepIdx++;
+    stepLabel = `Step ${stepIdx} of ${script.length}`;
+    renderRace();
+    if (stepIdx >= script.length) stopPlay();
+  }
+
+  function renderRace() {
+    if (!rs) return;
+    const lanes = $("#lanes");
+    lanes.replaceChildren();
+    MSGS.forEach((m, i) => {
+      const t = rs.th[i];
+      const lane = document.createElement("div");
+      lane.className = "lane";
+      const id = document.createElement("span");
+      id.className = "tid";
+      const dot = document.createElement("i");
+      dot.style.background = `var(--t${i})`;
+      id.append(dot, `W${i}`);
+      const what = document.createElement("div");
+      what.className = "what";
+      const msg = document.createElement("span");
+      msg.className = "msg";
+      msg.textContent = `"${m}" (${m.length} B)`;
+      const note = document.createElement("span");
+      note.className = "note";
+      note.textContent = t.note || "waiting to start";
+      what.append(msg, note);
+      const pill = document.createElement("span");
+      pill.className = "pill" + ({ run: " run", sleep: " sleep", done: " done" }[t.pill] || "");
+      pill.textContent = t.label;
+      lane.append(id, what, pill);
+      lanes.append(lane);
+    });
+
+    const ll = $("#lockline");
+    if (mode === "nolock") {
+      ll.textContent = "chardev_lock: removed in this run";
+    } else {
+      ll.replaceChildren("chardev_lock: ");
+      const b = document.createElement("b");
+      b.textContent = rs.lock === null ? "free" : `held by W${rs.lock}`;
+      ll.append(b);
+      if (rs.waiters.length) ll.append(` · waiting: ${rs.waiters.map((w) => "W" + w).join(", ")}`);
+    }
+
+    const strip = $("#strip");
+    strip.replaceChildren();
+    rs.cells.forEach((c, i) => {
+      const el = document.createElement("div");
+      el.className = "cellx" + (c.kind === "hdr" ? " hdr" : "") + (i < rs.used ? " used" : "") + (c.b !== null && i >= rs.used ? " stale" : "");
+      if (c.b !== null) {
+        el.style.background = `color-mix(in srgb, var(--t${c.owner}) ${c.kind === "hdr" ? 34 : 18}%, var(--panel))`;
+        el.style.color = `var(--t${c.owner})`;
+        el.textContent = c.kind === "hdr" ? c.b.toString(16).padStart(2, "0") : String.fromCharCode(c.b);
+        el.title = `offset ${i}: W${c.owner} ${c.kind === "hdr" ? "header" : "payload"}`;
+      } else {
+        el.title = `offset ${i}: free`;
+      }
+      strip.append(el);
+    });
+    $("#r-used").textContent = rs.used;
+    $("#r-count").textContent = rs.count;
+    $("#r-stepno").textContent = stepLabel;
+    $("#r-caption").textContent = caption;
+
+    const res = $("#r-result");
+    if (stepIdx >= script.length) {
+      const v = verify();
+      const good = v.lost.length === 0 && v.bad === 0;
+      res.className = "result " + (good ? "good" : "bad");
+      res.textContent = good
+        ? `All 3 writes succeeded and all 3 messages read back intact.`
+        : `All 3 writes returned success, but only ${v.intact.length} message${v.intact.length === 1 ? " is" : "s are"} in the queue. Lost: ${v.lost.map((i) => "W" + i).join(", ")}${v.bad ? `, plus ${v.bad} corrupted` : ""}.`;
+      res.hidden = false;
+    } else {
+      res.hidden = true;
+    }
+    $("#r-step").disabled = stepIdx >= script.length;
+  }
+
+  function stopPlay() {
+    if (timer) clearInterval(timer);
+    timer = null;
+    $("#r-play").textContent = "Play";
+  }
+  $("#r-step").addEventListener("click", () => { stopPlay(); step(); });
+  $("#r-reset").addEventListener("click", resetRace);
+  $("#r-play").addEventListener("click", () => {
+    if (timer) { stopPlay(); return; }
+    if (stepIdx >= script.length) resetRace();
+    $("#r-play").textContent = "Pause";
+    step();
+    timer = setInterval(step, 2200);
+  });
+  seg.addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-mode]");
+    if (!b || b.dataset.mode === mode) return;
+    mode = b.dataset.mode;
+    seg.dataset.mode = mode;
+    seg.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    resetRace();
+  });
+
+  /* ================================================== copy buttons */
+  document.querySelectorAll("[data-copy]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const src = document.getElementById(btn.dataset.copy);
+      const text = src.textContent;
+      const done = () => { btn.textContent = "Copied"; setTimeout(() => { btn.textContent = "Copy"; }, 1400); };
+      const fallback = () => {
+        const r = document.createRange();
+        r.selectNodeContents(src);
+        const sel = getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+        btn.textContent = "Selected";
+        setTimeout(() => { btn.textContent = "Copy"; }, 1400);
+      };
+      try {
+        navigator.clipboard.writeText(text).then(done, fallback);
+      } catch (e) {
+        fallback();
+      }
+    });
+  });
+
+  /* ================================================== boot: same opening as the test program */
+  readColors();
+  dmesg("info", `loaded: major 510 minor 0, buffer ${BUF_SIZE} bytes`);
+  drvOpen();
+  sys(`openat(AT_FDCWD, "/dev/chardev", O_RDWR)`, { ret: FD });
+  ["hello", "kernel world", "x"].forEach((m) => {
+    const b = enc.encode(m);
+    const res = drvWrite(b);
+    sys(`write(${FD}, ${cstr(b)}, ${b.length})`, res);
+  });
+  doGetCount();
+  updateCount();
+  render();
+  resetRace();
+})();
+</script>

@@ -1,0 +1,11 @@
+# Kbuild outputs
+*.o
+*.ko
+*.mod
+*.mod.c
+.*.cmd
+modules.order
+Module.symvers
+
+# User-space build
+user/chardev_test
